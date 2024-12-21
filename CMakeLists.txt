@@ -6,6 +6,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_BUILD_TYPE Debug)
 set(ubsan "ub sanitaser" ON)
 
+find_package(OpenGL REQUIRED)
+find_package(GLUT REQUIRED)
+find_package(X11 REQUIRED)
+
+
+
 
 IF(CMAKE_BUILD_TYPE MATCHES Debug)
   message(" \n ——————————► DEBUG ◄——————————")
@@ -120,3 +126,12 @@ set (SOURCE_FILES ${CPP_FILES})
 
 
 add_executable(test ${CPP_FILES})
+
+target_link_libraries(test PRIVATE
+    OpenGL::GL
+    OpenGL::GLU
+    GLUT::GLUT
+    ${X11_LIBRARIES}
+    ${X11_Xi_LIB}
+    ${X11_Xmu_LIB}
+)
