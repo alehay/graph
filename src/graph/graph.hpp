@@ -272,7 +272,7 @@ public:
         g,
         boost::make_iterator_property_map(positions.begin(),
                                           boost::get(boost::vertex_index, g)),
-        topology, boost::cooling(boost::linear_cooling<double>(100)));
+        topology, boost::cooling(boost::linear_cooling<double>(40)));
   }
 
   std::vector<std::pair<double, double>> get2DVertexPositions() const override {

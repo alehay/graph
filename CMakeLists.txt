@@ -7,8 +7,10 @@ set(CMAKE_BUILD_TYPE Debug)
 set(ubsan "ub sanitaser" ON)
 
 find_package(OpenGL REQUIRED)
-find_package(GLUT REQUIRED)
+find_package(glfw3 REQUIRED)
 find_package(X11 REQUIRED)
+include_directories(${GLFW_INCLUDE_DIRS})
+
 
 
 
@@ -129,8 +131,8 @@ add_executable(test ${CPP_FILES})
 
 target_link_libraries(test PRIVATE
     OpenGL::GL
-    OpenGL::GLU
-    GLUT::GLUT
+    glfw
+    ${GLFW_LIBRARIES}
     ${X11_LIBRARIES}
     ${X11_Xi_LIB}
     ${X11_Xmu_LIB}
