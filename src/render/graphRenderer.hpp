@@ -39,7 +39,7 @@ private:
 
         // Generate initial random layout
         boost::minstd_rand gen;
-        boost::rectangle_topology<> topology(gen, 0, 0, windowWidth, windowHeight);
+        boost::rectangle_topology<> topology(gen, 10, 10, windowWidth - 10, windowHeight - 10);
         boost::random_graph_layout(
             g,
             make_iterator_property_map(positions.begin(), get(boost::vertex_index, g)),
@@ -53,34 +53,33 @@ private:
             cooling(boost::linear_cooling<double>(100)));
     }
 
-    void drawVertices() {
-        glColor3f(1.0f, 0.0f, 0.0f); // Red color for vertices
-        glPointSize(5.0f);
-        
-        glBegin(GL_POINTS);
-        for (const auto& vertex : graph.getVertices()) {
-            auto& pos = positions[vertex];
-            glVertex2f(pos[0] / windowWidth * 2 - 1, pos[1] / windowHeight * 2 - 1);
-        }
-        glEnd();
+void drawVertices() {
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glPointSize(15.0f);
+    
+    glBegin(GL_POINTS);
+    for (const auto& vertex : graph.getVertices()) {
+        auto& pos = positions[vertex];
+        glVertex2f(pos[0], pos[1]);
     }
+    glEnd();
+}
 
-    void drawEdges() {
-        glLineWidth(1);
-        glColor3f(0.4f, 0.4f, 1.0f);
+void drawEdges() {
+    glLineWidth(1);
+    glColor3f(0.4f, 0.4f, 1.0f);
+    
+    glBegin(GL_LINES);
+    for (const auto& edge : graph.getEdges()) {
+        auto source = boost::source(edge, graph.getBoostGraph());
+        auto target = boost::target(edge, graph.getBoostGraph());
+        auto& sourcePos = positions[source];
+        auto& targetPos = positions[target];
         
-        glBegin(GL_LINES);
-        for (const auto& edge : graph.getEdges()) {
-            auto source = boost::source(edge, graph.getBoostGraph());
-            auto target = boost::target(edge, graph.getBoostGraph());
-            auto& sourcePos = positions[source];
-            auto& targetPos = positions[target];
-            
-            glVertex2f(sourcePos[0] / windowWidth * 2 - 1,
-                       sourcePos[1] / windowHeight * 2 - 1);
-            glVertex2f(targetPos[0] / windowWidth * 2 - 1,
-                       targetPos[1] / windowHeight * 2 - 1);
-        }
-        glEnd();
+        glVertex2f(sourcePos[0], sourcePos[1]);
+        glVertex2f(targetPos[0], targetPos[1]);
     }
+    glEnd();
+}
+
 };

@@ -35,7 +35,7 @@ private:
   using BoostGraph = boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
                                            VertexProperty, EdgeProperty>;
   BoostGraph g;
-
+public:
   using vertex_descriptor = typename boost::graph_traits<BoostGraph>::vertex_descriptor;
   using edge_descriptor = typename boost::graph_traits<BoostGraph>::edge_descriptor;
 
