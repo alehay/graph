@@ -679,6 +679,22 @@ public:
     return {};
   }
 
+  std::vector<std::tuple<double, double, double>> get3DVertexPositions() const {
+    if (layoutManager) {
+      return layoutManager->get3DVertexPositions();
+    }
+    return {};
+  }
+
+  std::vector<std::pair<std::tuple<double, double, double>,
+                        std::tuple<double, double, double>>>
+  get3DEdgePositions() const {
+    if (layoutManager) {
+      return layoutManager->get3DEdgePositions(*structure);
+    }
+    return {};
+  }
+
   vertex_descriptor addVertex(const VertexProperty &vp = VertexProperty()) {
     return vertexOps->addVertex(vp);
   }

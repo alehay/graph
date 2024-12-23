@@ -10,6 +10,7 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(X11 REQUIRED)
 include_directories(${GLFW_INCLUDE_DIRS})
+find_package(GLEW REQUIRED)
 
 
 
@@ -136,4 +137,6 @@ target_link_libraries(test PRIVATE
     ${X11_LIBRARIES}
     ${X11_Xi_LIB}
     ${X11_Xmu_LIB}
+    GLEW::GLEW
+    ${OPENGL_LIBRARIES} GLU
 )
