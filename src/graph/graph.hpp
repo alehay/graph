@@ -12,6 +12,7 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
 
+#include <boost/graph/circle_layout.hpp>
 #include <boost/graph/fruchterman_reingold.hpp>
 #include <boost/graph/random_layout.hpp>
 #include <stdexcept>
@@ -235,10 +236,20 @@ public:
       const IGraphStructure<VertexProperty, EdgeProperty> &graph) = 0;
   virtual std::vector<std::pair<double, double>>
   get2DVertexPositions() const = 0;
+
+  virtual std::vector<std::tuple<double, double, double>>
+  get3DVertexPositions() const = 0;
   virtual std::vector<
       std::pair<std::pair<double, double>, std::pair<double, double>>>
   get2DEdgePositions(
       const IGraphStructure<VertexProperty, EdgeProperty> &graph) const = 0;
+  std::vector<std::pair<
+      std::tuple<double, double, double>,
+      std::tuple<
+          double, double,
+          double>>> virtual get3DEdgePositions(const IGraphStructure<VertexProperty,
+                                                                     EdgeProperty>
+                                                   &graph) const = 0;
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -304,6 +315,292 @@ public:
 
     return edgePositions;
   }
+
+  std::vector<std::tuple<double, double, double>> get3DVertexPositions() {
+
+    std::vector<std::tuple<double, double, double>> res;
+    for (const auto &pos : positions) {
+      res.emplace_back(pos[0], pos[1], 0);
+    }
+    return res;
+  }
+
+  std::vector<std::pair<std::tuple<double, double, double>,
+                        std::tuple<double, double, double>>>
+  get3DEdgePositions(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) {
+    std::vector<std::pair<std::tuple<double, double, double>,
+                          std::tuple<double, double, double>>>
+        edgePositions;
+    const auto &g = graph.getBoostGraph();
+
+    auto edges = boost::edges(g);
+    for (auto it = edges.first; it != edges.second; ++it) {
+      auto source = boost::source(*it, g);
+      auto target = boost::target(*it, g);
+
+      const auto &sourcePos = positions[source];
+      const auto &targetPos = positions[target];
+
+      edgePositions.emplace_back(sourcePos, targetPos);
+    }
+
+    return edgePositions;
+  }
+};
+
+#if 0
+template <typename VertexProperty, typename EdgeProperty>
+class CircularLayout : public ILayoutManager<VertexProperty, EdgeProperty> {
+private:
+    std::vector<std::pair<double, double>> positions;
+    double radius;
+    double centerX;
+    double centerY;
+
+public:
+    CircularLayout(double radius, double centerX, double centerY)
+        : radius(radius), centerX(centerX), centerY(centerY) {}
+
+    void calculateLayout(
+        const IGraphStructure<VertexProperty, EdgeProperty>& graph) override {
+        const auto& g = graph.getBoostGraph();
+        size_t numVertices = boost::num_vertices(g);
+        positions.resize(numVertices);
+
+        double angleStep = 2 * M_PI / numVertices;
+        double currentAngle = 0;
+
+        for (size_t i = 0; i < numVertices; ++i) {
+            double x = centerX + radius * std::cos(currentAngle);
+            double y = centerY + radius * std::sin(currentAngle);
+            positions[i] = std::make_pair(x, y);
+            currentAngle += angleStep;
+        }
+    }
+
+    std::vector<std::pair<double, double>> get2DVertexPositions() const override {
+        return positions;
+    }
+
+    std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>>
+    get2DEdgePositions(
+        const IGraphStructure<VertexProperty, EdgeProperty>& graph) const override {
+        std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>> edgePositions;
+        const auto& g = graph.getBoostGraph();
+
+        auto edges = boost::edges(g);
+        for (auto it = edges.first; it != edges.second; ++it) {
+            auto source = boost::source(*it, g);
+            auto target = boost::target(*it, g);
+
+            const auto& sourcePos = positions[source];
+            const auto& targetPos = positions[target];
+
+            edgePositions.emplace_back(sourcePos, targetPos);
+        }
+
+        return edgePositions;
+    }
+};
+#endif
+
+template <typename VertexProperty, typename EdgeProperty>
+class CircleLayout : public ILayoutManager<VertexProperty, EdgeProperty> {
+private:
+  std::vector<boost::circle_topology<>::point_type> positions;
+  double radius;
+  double centerX;
+  double centerY;
+
+public:
+  CircleLayout(double radius, double centerX, double centerY)
+      : radius(radius), centerX(centerX), centerY(centerY) {}
+
+  void calculateLayout(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
+    const auto &g = graph.getBoostGraph();
+    positions.resize(boost::num_vertices(g));
+
+    boost::minstd_rand gen;
+    boost::circle_topology<> topology(gen, radius);
+
+    boost::circle_graph_layout(
+        g,
+        boost::make_iterator_property_map(positions.begin(),
+                                          boost::get(boost::vertex_index, g)),
+        radius);
+
+    // Adjust positions to be centered at (centerX, centerY)
+    for (auto &pos : positions) {
+      pos[0] += centerX;
+      pos[1] += centerY;
+    }
+  }
+
+  std::vector<std::pair<double, double>> get2DVertexPositions() const override {
+    std::vector<std::pair<double, double>> res;
+    for (const auto &pos : positions) {
+      res.emplace_back(pos[0], pos[1]);
+    }
+    return res;
+  }
+
+  std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>>
+  get2DEdgePositions(const IGraphStructure<VertexProperty, EdgeProperty> &graph)
+      const override {
+    std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>>
+        edgePositions;
+    const auto &g = graph.getBoostGraph();
+
+    auto edges = boost::edges(g);
+    for (auto it = edges.first; it != edges.second; ++it) {
+      auto source = boost::source(*it, g);
+      auto target = boost::target(*it, g);
+
+      const auto &sourcePos = positions[source];
+      const auto &targetPos = positions[target];
+
+      edgePositions.emplace_back(std::make_pair(sourcePos[0], sourcePos[1]),
+                                 std::make_pair(targetPos[0], targetPos[1]));
+    }
+
+    return edgePositions;
+  }
+
+  std::vector<std::tuple<double, double, double>>
+  get3DVertexPositions() const override {
+    std::vector<std::tuple<double, double, double>> res;
+    for (const auto &pos : positions) {
+      res.emplace_back(pos[0], pos[1], 0);
+    }
+    return res;
+  }
+
+  std::vector<std::pair<std::tuple<double, double, double>,
+                        std::tuple<double, double, double>>>
+  get3DEdgePositions(const IGraphStructure<VertexProperty, EdgeProperty> &graph)
+      const override {
+    std::vector<std::pair<std::tuple<double, double, double>,
+                          std::tuple<double, double, double>>>
+        edgePositions;
+    const auto &g = graph.getBoostGraph();
+
+    auto edges = boost::edges(g);
+    for (auto it = edges.first; it != edges.second; ++it) {
+      auto source = boost::source(*it, g);
+      auto target = boost::target(*it, g);
+
+      const auto &sourcePos = positions[source];
+      const auto &targetPos = positions[target];
+
+      edgePositions.emplace_back(
+          std::make_tuple(sourcePos[0], sourcePos[1], 0.0),
+          std::make_tuple(targetPos[0], targetPos[1], 0.0));
+    }
+
+    return edgePositions;
+  }
+};
+
+template <typename VertexProperty, typename EdgeProperty>
+class Cube3DLayout : public ILayoutManager<VertexProperty, EdgeProperty> {
+private:
+  std::vector<boost::cube_topology<>::point_type> positions;
+  double sideLength;
+  double centerX, centerY, centerZ;
+
+public:
+  Cube3DLayout(double sideLength, double centerX, double centerY,
+               double centerZ)
+      : sideLength(sideLength), centerX(centerX), centerY(centerY),
+        centerZ(centerZ) {}
+
+  void calculateLayout(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
+    const auto &g = graph.getBoostGraph();
+    positions.resize(boost::num_vertices(g));
+
+    boost::minstd_rand gen;
+    boost::cube_topology<> topology(gen, sideLength);
+
+    boost::random_graph_layout(
+        g,
+        boost::make_iterator_property_map(positions.begin(),
+                                          boost::get(boost::vertex_index, g)),
+        topology);
+
+    // Adjust positions to be centered at (centerX, centerY, centerZ)
+    for (auto &pos : positions) {
+      pos[0] += centerX - sideLength / 2;
+      pos[1] += centerY - sideLength / 2;
+      pos[2] += centerZ - sideLength / 2;
+    }
+  }
+
+  std::vector<std::tuple<double, double, double>> get3DVertexPositions() const {
+    std::vector<std::tuple<double, double, double>> res;
+    for (const auto &pos : positions) {
+      res.emplace_back(pos[0], pos[1], pos[2]);
+    }
+    return res;
+  }
+
+  std::vector<std::pair<double, double>> get2DVertexPositions() const override {
+    std::vector<std::pair<double, double>> res;
+    for (const auto &pos : positions) {
+      res.emplace_back(pos[0], pos[1]); // Project to XY plane
+    }
+    return res;
+  }
+
+  std::vector<std::pair<std::tuple<double, double, double>,
+                        std::tuple<double, double, double>>>
+  get3DEdgePositions(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) const {
+    std::vector<std::pair<std::tuple<double, double, double>,
+                          std::tuple<double, double, double>>>
+        edgePositions;
+    const auto &g = graph.getBoostGraph();
+
+    auto edges = boost::edges(g);
+    for (auto it = edges.first; it != edges.second; ++it) {
+      auto source = boost::source(*it, g);
+      auto target = boost::target(*it, g);
+
+      const auto &sourcePos = positions[source];
+      const auto &targetPos = positions[target];
+
+      edgePositions.emplace_back(
+          std::make_tuple(sourcePos[0], sourcePos[1], sourcePos[2]),
+          std::make_tuple(targetPos[0], targetPos[1], targetPos[2]));
+    }
+
+    return edgePositions;
+  }
+
+  std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>>
+  get2DEdgePositions(const IGraphStructure<VertexProperty, EdgeProperty> &graph)
+      const override {
+    std::vector<std::pair<std::pair<double, double>, std::pair<double, double>>>
+        edgePositions;
+    const auto &g = graph.getBoostGraph();
+
+    auto edges = boost::edges(g);
+    for (auto it = edges.first; it != edges.second; ++it) {
+      auto source = boost::source(*it, g);
+      auto target = boost::target(*it, g);
+
+      const auto &sourcePos = positions[source];
+      const auto &targetPos = positions[target];
+
+      edgePositions.emplace_back(
+          std::make_pair(sourcePos[0], sourcePos[1]), // Project to XY plane
+          std::make_pair(targetPos[0], targetPos[1]));
+    }
+
+    return edgePositions;
+  }
 };
 
 template <typename VertexProperty = boost::no_property,
@@ -341,6 +638,24 @@ public:
   void setLayoutManager(
       std::unique_ptr<ILayoutManager<VertexProperty, EdgeProperty>> manager) {
     layoutManager = std::move(manager);
+  }
+
+  void setRectangleLayoutManager(int width, int height) {
+    layoutManager = std::make_unique<
+        FruchtermanReingoldLayout<VertexProperty, EdgeProperty>>(width, height);
+  }
+
+  void setCircularLayoutManager(double radius, double centerX, double centerY) {
+    layoutManager =
+        std::make_unique<CircleLayout<VertexProperty, EdgeProperty>>(
+            radius, centerX, centerY);
+  }
+
+  void setCube3DLayoutManager(double sideLength, double centerX, double centerY,
+                              double centerZ) {
+    layoutManager =
+        std::make_unique<Cube3DLayout<VertexProperty, EdgeProperty>>(
+            sideLength, centerX, centerY, centerZ);
   }
 
   void calculateLayout() {

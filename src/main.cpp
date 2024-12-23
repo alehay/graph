@@ -59,11 +59,11 @@ int main() {
   glfwSetKeyCallback(window, key_callback);
 
   g = new Graph<std::string, int>;
-  auto layoutManager =
-      std::make_unique<FruchtermanReingoldLayout<std::string, int>>(Width,
-                                                                    Height);
-  g->setLayoutManager(std::move(layoutManager));
 
+  //g->setRectangleLayoutManager(Width, Height);
+  g->setCircularLayoutManager(std::min(Width, Height) / 2,   Width / 2 , Height / 2);
+
+ 
   // Add vertices and edges to the graph...
   // (Your existing graph setup code here)
 
