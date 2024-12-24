@@ -88,41 +88,73 @@ public:
  */
 class BasicOpenGLDrawer : public IOpenGLDrawer {
 public:
-  void drawVertices(const std::vector<std::tuple<double, double, double>>
-                        &positions) override {
-    glColor3f(1.0f, 0.0f, 0.0f);
-    glPointSize(5.0f);
+    void drawVertices(const std::vector<std::tuple<double, double, double>> &positions) override {
+        // Enable point smoothing and blending to get a nicer circle-like point
+        glEnable(GL_POINT_SMOOTH);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glBegin(GL_POINTS);
-    for (const auto &pos : positions) {
-      glVertex3f(static_cast<float>(std::get<0>(pos)),
-                 static_cast<float>(std::get<1>(pos)),
-                 static_cast<float>(std::get<2>(pos)));
+        // Increase point size
+        glPointSize(10.0f);
+
+        // Set vertex color to a more vivid red
+        glColor3f(1.0f, 0.2f, 0.2f);
+
+        glBegin(GL_POINTS);
+        for (const auto &pos : positions) {
+            glVertex3f(
+                static_cast<float>(std::get<0>(pos)),
+                static_cast<float>(std::get<1>(pos)),
+                static_cast<float>(std::get<2>(pos))
+            );
+        }
+        glEnd();
+
+        // Disable blending / smoothing afterwards if you don’t need them further
+        glDisable(GL_BLEND);
+        glDisable(GL_POINT_SMOOTH);
     }
-    glEnd();
-  }
 
-  void drawEdges(
-      const std::vector<std::pair<std::tuple<double, double, double>,
-                                  std::tuple<double, double, double>>> &edges)
-      override {
-    glLineWidth(1);
-    glColor3f(0.4f, 0.4f, 1.0f);
+    void drawEdges(const std::vector<std::pair<
+                       std::tuple<double, double, double>,
+                       std::tuple<double, double, double>
+                   >> &edges) override
+    {
+        // Enable line smoothing and blending to get smoother edges
+        glEnable(GL_LINE_SMOOTH);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glBegin(GL_LINES);
-    for (const auto &edge : edges) {
-      auto &src = edge.first;
-      auto &tgt = edge.second;
-      glVertex3f(static_cast<float>(std::get<0>(src)),
-                 static_cast<float>(std::get<1>(src)),
-                 static_cast<float>(std::get<2>(src)));
-      glVertex3f(static_cast<float>(std::get<0>(tgt)),
-                 static_cast<float>(std::get<1>(tgt)),
-                 static_cast<float>(std::get<2>(tgt)));
+        // Slightly thicker lines
+        glLineWidth(2.0f);
+
+        // Set edge color to a calmer bluish tone
+        glColor3f(0.3f, 0.3f, 1.0f);
+
+        glBegin(GL_LINES);
+        for (const auto &edge : edges) {
+            const auto &src = edge.first;
+            const auto &tgt = edge.second;
+
+            glVertex3f(
+                static_cast<float>(std::get<0>(src)),
+                static_cast<float>(std::get<1>(src)),
+                static_cast<float>(std::get<2>(src))
+            );
+            glVertex3f(
+                static_cast<float>(std::get<0>(tgt)),
+                static_cast<float>(std::get<1>(tgt)),
+                static_cast<float>(std::get<2>(tgt))
+            );
+        }
+        glEnd();
+
+        // Clean up
+        glDisable(GL_BLEND);
+        glDisable(GL_LINE_SMOOTH);
     }
-    glEnd();
-  }
 };
+
 
 /**
  * 5. The GraphRenderer is now responsible only for orchestrating:
