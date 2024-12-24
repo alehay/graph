@@ -14,12 +14,12 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
 
   // Update projection matrix for 3D
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(45.0f, (GLfloat)width / (GLfloat)height, 0.1f, 100.0f);
+//  glMatrixMode(GL_PROJECTION);
+//  glLoadIdentity();
+//  gluPerspective(45.0f, (GLfloat)width / (GLfloat)height, 0.1f, 100.0f);
 
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
+//  glMatrixMode(GL_MODELVIEW);
+//  glLoadIdentity();
 }
 
 int tic = 0;
