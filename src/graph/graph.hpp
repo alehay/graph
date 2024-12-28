@@ -725,6 +725,19 @@ public:
     return structure->getVertices();
   }
 
+  int getWeightForEdge(edge_descriptor e) {
+
+    // get(edge_weight, g) returns a property map for weights
+    auto weightMap = get(boost::edge_weight, structure->getBoostGraph());
+    return weightMap[e];
+  }
+
+  std::tuple<double, double, double>
+  getVertexPosition3D(vertex_descriptor v) const {
+    // Internally calls layoutManager->get3DPositionOfVertex(v)
+    return layoutManager->get3DPosition(v);
+  }
+
   std::vector<edge_descriptor> getEdges() const {
     return structure->getEdges();
   }

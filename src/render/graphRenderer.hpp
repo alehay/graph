@@ -1,6 +1,13 @@
 // clang-format off
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <GL/gl.h>
+#include <GL/glu.h>        // For gluProject
+#include <GL/glut.h>       // For bitmap font rendering (if desired)
+#include <vector>
+#include <tuple>
+#include <string>
+#include <iostream>
 #include "../graph/graph.hpp"
 #include <boost/graph/fruchterman_reingold.hpp>
 #include <boost/graph/random_layout.hpp>
@@ -8,7 +15,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-//// clang-format on
+// clang-format on
 
 #include "../graph/graph.hpp"
 
@@ -24,6 +31,7 @@ public:
   virtual glm::mat4 getViewMatrix() const = 0;
   virtual void setGraphCenter(const glm::vec3 &center) = 0;
   virtual void update() = 0;
+  virtual glm::vec3 getCameraPos() const = 0;
 };
 
 /**
@@ -62,13 +70,16 @@ public:
     return glm::lookAt(cameraPosition, cameraTarget,
                        glm::vec3(0.0f, 1.0f, 0.0f));
   }
+
+  glm::vec3 getCameraPos() const override { return cameraPosition; }
 };
 
-/**
- * 3. Define an interface for an OpenGL drawer.
- *    This separates the actual drawing details from higher-level rendering
- * logic.
- */
+struct EdgeLabelInfo {
+  std::tuple<double, double, double> midpoint;
+  std::string label;
+  double distanceToCamera; // or any additional info you might need
+};
+
 class IOpenGLDrawer {
 public:
   virtual ~IOpenGLDrawer() = default;
@@ -80,6 +91,10 @@ public:
   drawEdges(const std::vector<std::pair<std::tuple<double, double, double>,
                                         std::tuple<double, double, double>>>
                 &edges) = 0;
+  virtual void drawEdgeMidpoints2D(
+      const std::vector<std::pair<std::tuple<double, double, double>,
+                                  std::tuple<double, double, double>>> &edges,
+      const std::string &label, const glm::vec3 &cameraPos) = 0;
 };
 
 /**
@@ -88,73 +103,188 @@ public:
  */
 class BasicOpenGLDrawer : public IOpenGLDrawer {
 public:
-    void drawVertices(const std::vector<std::tuple<double, double, double>> &positions) override {
-        // Enable point smoothing and blending to get a nicer circle-like point
-        glEnable(GL_POINT_SMOOTH);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  void drawVertices(const std::vector<std::tuple<double, double, double>>
+                        &positions) override {
+    // Enable point smoothing and blending to get a nicer circle-like point
+    glEnable(GL_POINT_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // Increase point size
-        glPointSize(10.0f);
+    // Increase point size
+    glPointSize(12.0f);
 
-        // Set vertex color to a more vivid red
-        glColor3f(1.0f, 0.2f, 0.2f);
+    // Set vertex color to a more vivid red
+    glColor3f(0.8f, 0.2f, 0.2f);
 
-        glBegin(GL_POINTS);
-        for (const auto &pos : positions) {
-            glVertex3f(
-                static_cast<float>(std::get<0>(pos)),
-                static_cast<float>(std::get<1>(pos)),
-                static_cast<float>(std::get<2>(pos))
-            );
-        }
-        glEnd();
+    glBegin(GL_POINTS);
+    for (const auto &pos : positions) {
+      glVertex3f(static_cast<float>(std::get<0>(pos)),
+                 static_cast<float>(std::get<1>(pos)),
+                 static_cast<float>(std::get<2>(pos)));
+    }
+    glEnd();
 
-        // Disable blending / smoothing afterwards if you don’t need them further
-        glDisable(GL_BLEND);
-        glDisable(GL_POINT_SMOOTH);
+    // Disable blending / smoothing afterwards if you don’t need them further
+    glDisable(GL_BLEND);
+    glDisable(GL_POINT_SMOOTH);
+  }
+
+  void drawEdges(
+      const std::vector<std::pair<std::tuple<double, double, double>,
+                                  std::tuple<double, double, double>>> &edges)
+      override {
+    // Enable line smoothing and blending to get smoother edges
+    glEnable(GL_LINE_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Slightly thicker lines
+    glLineWidth(2.0f);
+
+    // Set edge color to a calmer bluish tone
+    glColor3f(0.3f, 0.3f, 1.0f);
+
+    glBegin(GL_LINES);
+    for (const auto &edge : edges) {
+      const auto &src = edge.first;
+      const auto &tgt = edge.second;
+
+      glVertex3f(static_cast<float>(std::get<0>(src)),
+                 static_cast<float>(std::get<1>(src)),
+                 static_cast<float>(std::get<2>(src)));
+      glVertex3f(static_cast<float>(std::get<0>(tgt)),
+                 static_cast<float>(std::get<1>(tgt)),
+                 static_cast<float>(std::get<2>(tgt)));
+    }
+    glEnd();
+
+    // Clean up
+    glDisable(GL_BLEND);
+    glDisable(GL_LINE_SMOOTH);
+  }
+
+  struct ProjectedMidpoint {
+    GLdouble winX;
+    GLdouble winY;
+    GLdouble distance;
+  };
+
+  void drawEdgeMidpoints2D(
+      const std::vector<std::pair<std::tuple<double, double, double>,
+                                  std::tuple<double, double, double>>> &edges,
+      const std::string &label, const glm::vec3 &cameraPos) override {
+    // 1. Grab the current matrices and viewport info
+    GLdouble modelview[16], projection[16];
+    GLint viewport[4];
+
+    glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+    glGetIntegerv(GL_VIEWPORT, viewport);
+
+    // 2. Compute midpoints in 3D, then project them to 2D
+    std::vector<ProjectedMidpoint> projectedPoints;
+    projectedPoints.reserve(edges.size());
+
+    for (const auto &edge : edges) {
+      const auto &src = edge.first;  // (sx, sy, sz)
+      const auto &tgt = edge.second; // (tx, ty, tz)
+
+      // Compute midpoint
+      double mx = (std::get<0>(src) + std::get<0>(tgt)) / 2.0;
+      double my = (std::get<1>(src) + std::get<1>(tgt)) / 2.0;
+      double mz = (std::get<2>(src) + std::get<2>(tgt)) / 2.0;
+
+      double dx = mx - cameraPos.x;
+      double dy = my - cameraPos.y;
+      double dz = mz - cameraPos.z;
+      double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+      // Project to 2D screen coordinates
+      GLdouble winX, winY, winZ;
+      if (gluProject(mx, my, mz, modelview, projection, viewport, &winX, &winY,
+                     &winZ) == GL_TRUE) {
+        // If your coordinate system or text rendering expects top-left origin,
+        // you might need: winY = viewport[3] - winY;
+        projectedPoints.emplace_back(winX, winY, distance);
+      }
     }
 
-    void drawEdges(const std::vector<std::pair<
-                       std::tuple<double, double, double>,
-                       std::tuple<double, double, double>
-                   >> &edges) override
-    {
-        // Enable line smoothing and blending to get smoother edges
-        glEnable(GL_LINE_SMOOTH);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // 3. Switch to a 2D orthographic projection
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix(); // Save the current projection
+    glLoadIdentity();
+    glOrtho(0, viewport[2], 0, viewport[3], -1, 1);
 
-        // Slightly thicker lines
-        glLineWidth(2.0f);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix(); // Save the current modelview
+    glLoadIdentity();
 
-        // Set edge color to a calmer bluish tone
-        glColor3f(0.3f, 0.3f, 1.0f);
+    // Optionally disable depth test so labels appear on top
+    glDisable(GL_DEPTH_TEST);
 
-        glBegin(GL_LINES);
-        for (const auto &edge : edges) {
-            const auto &src = edge.first;
-            const auto &tgt = edge.second;
+    // Draw small dots and labels in screen space
+    glColor3f(0.0f, 0.0f, 0.5f);
+    glPointSize(5.0f);
 
-            glVertex3f(
-                static_cast<float>(std::get<0>(src)),
-                static_cast<float>(std::get<1>(src)),
-                static_cast<float>(std::get<2>(src))
-            );
-            glVertex3f(
-                static_cast<float>(std::get<0>(tgt)),
-                static_cast<float>(std::get<1>(tgt)),
-                static_cast<float>(std::get<2>(tgt))
-            );
-        }
-        glEnd();
-
-        // Clean up
-        glDisable(GL_BLEND);
-        glDisable(GL_LINE_SMOOTH);
+    glBegin(GL_POINTS);
+    for (const auto &[x, y, distance] : projectedPoints) {
+      glVertex2d(x, y);
     }
+    glEnd();
+
+    // 4. Render the label near each point
+    //    We'll offset the text slightly to the right and above the point
+    for (const auto &pt : projectedPoints) {
+      float offsetX = 5.0f;
+      float offsetY = 5.0f;
+
+      // Decide on a formula to turn 'distance' into a scale factor.
+      // Example: larger scale if closer to camera, smaller if far away.
+      // Just ensure you handle potential zero distances or extremely large
+      // distances.
+      // float scale = someFunctionOf(pt.distance);
+      float scale = 100.0f / ((pt.distance + 1.0f)) / 10.0f;
+
+      std::string scale_str = std::to_string(scale);
+
+      void *fontToUse = GLUT_BITMAP_HELVETICA_10;
+
+      if (scale >= 0.85f) {
+        fontToUse = GLUT_BITMAP_HELVETICA_18; // bigger font
+      } else if (scale >= 0.75f) {
+        fontToUse = GLUT_BITMAP_HELVETICA_12; // medium font
+      }
+
+      // else it stays HELVETICA_10 for small
+
+      glPushMatrix();
+      {
+        // Translate to (winX + offsetX, winY + offsetY)
+        glTranslatef(pt.winX + offsetX, pt.winY + offsetY, 0.0f);
+
+        // Scale in 2D
+        glScalef(scale, scale, 1.0f);
+
+        // Now set the raster pos at the local origin
+        glRasterPos2f(0.0f, 0.0f);
+
+        // Draw text at (0,0) in scaled space
+        for (char c : scale_str) {
+          glutBitmapCharacter(fontToUse, c);
+        }
+      }
+      glPopMatrix();
+    }
+
+    // Restore state
+    glEnable(GL_DEPTH_TEST);
+
+    glPopMatrix(); // Restore the old modelview
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix(); // Restore the old projection
+    glMatrixMode(GL_MODELVIEW);
+  }
 };
-
 
 /**
  * 5. The GraphRenderer is now responsible only for orchestrating:
@@ -222,6 +352,9 @@ public:
     // Delegate drawing
     drawer->drawVertices(graph->get3DVertexPositions());
     drawer->drawEdges(graph->get3DEdgePositions());
+    std::string test = " test ";
+    drawer->drawEdgeMidpoints2D(graph->get3DEdgePositions(), test,
+                                camera->getCameraPos());
   }
 
 private:

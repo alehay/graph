@@ -44,7 +44,10 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
   }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+
+  glutInit(&argc, argv);
+
   if (!glfwInit()) {
     std::cerr << "Failed to initialize GLFW" << std::endl;
     return -1;
