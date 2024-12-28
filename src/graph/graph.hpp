@@ -18,6 +18,13 @@
 #include <stdexcept>
 #include <vector>
 
+template <typename T, typename = void>
+struct is_number_like : std::false_type {};
+
+template <typename T>
+struct is_number_like<T, decltype(static_cast<void>(static_cast<double>(
+                             std::declval<T>())))> : std::true_type {};
+
 template <typename VertexProperty, typename EdgeProperty> struct IGraphTraits {
   using BoostGraph =
       boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
@@ -159,7 +166,7 @@ public:
                                                    const EdgeProperty &ep) = 0;
   virtual void removeEdge(vertex_descriptor source,
                           vertex_descriptor target) = 0;
-  virtual EdgeProperty &getEdgeProperty(edge_descriptor e) = 0;
+  virtual EdgeProperty getEdgeProperty(edge_descriptor e) = 0;
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -188,8 +195,8 @@ public:
     boost::remove_edge(source, target, graphStructure.getBoostGraph());
   }
 
-  EdgeProperty &getEdgeProperty(edge_descriptor e) override {
-    return graphStructure.getBoostGraph()[e];
+  EdgeProperty getEdgeProperty(edge_descriptor e) override {
+    return get(boost::edge_weight, graphStructure.getBoostGraph(), e);
   }
 };
 
@@ -604,7 +611,7 @@ public:
 };
 
 template <typename VertexProperty = boost::no_property,
-          typename EdgeProperty = boost::no_property>
+          typename EdgeProperty = boost::property<boost::edge_weight_t, int>>
 class Graph {
 private:
   std::unique_ptr<IGraphStructure<VertexProperty, EdgeProperty>> structure;

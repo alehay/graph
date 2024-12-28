@@ -1,12 +1,14 @@
 #include "graph/graph.hpp"
 #include "render/graphRenderer.hpp"
 #include <GL/glew.h>
+
 #include <GLFW/glfw3.h>
 #include <iostream>
 
 GLint Width = 1200, Height = 800;
-GraphRenderer<std::string, int> *renderer;
-Graph<std::string, int> *g;
+GraphRenderer<std::string, boost::property<boost::edge_weight_t, int>>
+    *renderer;
+Graph<std::string, boost::property<boost::edge_weight_t, int>> *g;
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   Width = width;
@@ -14,12 +16,12 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
 
   // Update projection matrix for 3D
-//  glMatrixMode(GL_PROJECTION);
-//  glLoadIdentity();
-//  gluPerspective(45.0f, (GLfloat)width / (GLfloat)height, 0.1f, 100.0f);
+  //  glMatrixMode(GL_PROJECTION);
+  //  glLoadIdentity();
+  //  gluPerspective(45.0f, (GLfloat)width / (GLfloat)height, 0.1f, 100.0f);
 
-//  glMatrixMode(GL_MODELVIEW);
-//  glLoadIdentity();
+  //  glMatrixMode(GL_MODELVIEW);
+  //  glLoadIdentity();
 }
 
 int tic = 0;
@@ -29,12 +31,14 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
   if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
     glfwSetWindowShouldClose(window, GLFW_TRUE);
   if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
-    auto v = g->addVertex(std::to_string(tic++));
-    auto rnd_1 = g->getRandomVertex();
-    auto rnd_2 = g->getRandomVertex();
-    g->addEdge(v, rnd_1);
-    if (g->getVertices().size() > 10) {
-      g->addEdge(v, rnd_2);
+    for (int i = 0; i < 10; i++) {
+      auto v = g->addVertex(std::to_string(tic++));
+      auto rnd_1 = g->getRandomVertex();
+      auto rnd_2 = g->getRandomVertex();
+      g->addEdge(v, rnd_1);
+      if (g->getVertices().size() > 20) {
+        g->addEdge(v, rnd_2, i);
+      }
     }
     g->calculateLayout();
   }
@@ -48,6 +52,14 @@ int main() {
 
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+
+  const GLubyte *renderer_str = glGetString(GL_RENDERER); // GPU or software?
+  const GLubyte *vendor_str = glGetString(GL_VENDOR); // e.g. "NVIDIA", "Intel"
+  const GLubyte *version_str = glGetString(GL_VERSION);
+
+  //  std::cout << "Renderer: " << renderer_str << std::endl;
+  std::cout << "Vendor:   " << vendor_str << std::endl;
+  std::cout << "Version:  " << version_str << std::endl;
 
   GLFWwindow *window =
       glfwCreateWindow(Width, Height, "3D Graph Visualization", NULL, NULL);
@@ -66,7 +78,7 @@ int main() {
     return -1;
   }
 
-  g = new Graph<std::string, int>;
+  g = new Graph<std::string>;
   g->setCube3DLayoutManager(7.0, 5.0, 5.0,
                             5.0); // Adjust these values as needed
 
@@ -79,11 +91,12 @@ int main() {
   }
   g->calculateLayout();
 
-  renderer = new GraphRenderer<std::string, int>(g, Width, Height);
+  renderer = new GraphRenderer<std::string,
+                               boost::property<boost::edge_weight_t, int>>(
+      g, Width, Height);
 
   // Enable depth testing
   glEnable(GL_DEPTH_TEST);
-
 
   while (!glfwWindowShouldClose(window)) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
