@@ -84,9 +84,8 @@ public:
   virtual void drawEdgeMidpoints2D(
       const std::vector<std::pair<std::tuple<double, double, double>,
                                   std::tuple<double, double, double>>> &edges,
-      const std::string &label, const glm::vec3 &cameraPos) = 0;
+      const std::vector<std::string> &labels, const glm::vec3 &cameraPos) = 0;
 };
-
 
 class BasicOpenGLDrawer : public IOpenGLDrawer {
 public:
@@ -159,7 +158,8 @@ public:
   void drawEdgeMidpoints2D(
       const std::vector<std::pair<std::tuple<double, double, double>,
                                   std::tuple<double, double, double>>> &edges,
-      const std::string &label, const glm::vec3 &cameraPos) override {
+      const std::vector<std::string> &labels,
+      const glm::vec3 &cameraPos) override {
     // 1. Grab the current matrices and viewport info
     GLdouble modelview[16], projection[16];
     GLint viewport[4];
@@ -219,22 +219,24 @@ public:
     }
     glEnd();
 
-    for (const auto &pt : projectedPoints) {
+    // for (const auto &pt : projectedPoints) {
+
+    for (int i = 0; i < labels.size(); ++i) {
+      auto &pt = projectedPoints[i];
       float offsetX = 5.0f;
       float offsetY = 5.0f;
 
       float scale = 100.0f / ((pt.distance + 1.0f)) / 10.0f;
 
-      std::string scale_str = std::to_string(scale);
+      std::string scale_str = labels[i];
 
       void *fontToUse = GLUT_BITMAP_HELVETICA_10;
 
       if (scale >= 0.85f) {
-        fontToUse = GLUT_BITMAP_HELVETICA_18; 
+        fontToUse = GLUT_BITMAP_HELVETICA_18;
       } else if (scale >= 0.75f) {
-        fontToUse = GLUT_BITMAP_HELVETICA_12; 
+        fontToUse = GLUT_BITMAP_HELVETICA_12;
       }
-
 
       glPushMatrix();
       {
@@ -264,7 +266,6 @@ public:
     glMatrixMode(GL_MODELVIEW);
   }
 };
-
 
 template <typename VertexProperty, typename EdgeProperty> class GraphRenderer {
 private:
@@ -322,10 +323,45 @@ public:
 
     // Delegate drawing
     drawer->drawVertices(graph->get3DVertexPositions());
-    drawer->drawEdges(graph->get3DEdgePositions());
+
+    std::vector<std::pair<std::tuple<double, double, double>,
+                          std::tuple<double, double, double>>>
+        vec;
+    std::vector<std::string> lables;
+
+    auto edgeInfoVec = graph->get3DEdgePositions();
+
+    for (const auto &edgeInfo : edgeInfoVec) {
+      // Method 1: Using boost::geometry::get
+      double src_x = boost::geometry::get<0>(edgeInfo.sourcePos);
+      double src_y = boost::geometry::get<1>(edgeInfo.sourcePos);
+      double src_z = boost::geometry::get<2>(edgeInfo.sourcePos);
+
+      double tgt_x = boost::geometry::get<0>(edgeInfo.targetPos);
+      double tgt_y = boost::geometry::get<1>(edgeInfo.targetPos);
+      double tgt_z = boost::geometry::get<2>(edgeInfo.targetPos);
+
+      // Create tuples for source and target positions
+      std::tuple<double, double, double> sourceTuple(src_x, src_y, src_z);
+      std::tuple<double, double, double> targetTuple(tgt_x, tgt_y, tgt_z);
+
+      // Add the pair to the vector
+      vec.emplace_back(std::make_pair(sourceTuple, targetTuple));
+
+      lables.emplace_back(std::to_string(edgeInfo.weight));
+
+      // Alternatively, if Boost3DPoint has member functions x(), y(), z():
+      /*
+      auto sourceTuple = std::make_tuple(edgeInfo.sourcePos.x(),
+      edgeInfo.sourcePos.y(), edgeInfo.sourcePos.z()); auto targetTuple =
+      std::make_tuple(edgeInfo.targetPos.x(), edgeInfo.targetPos.y(),
+      edgeInfo.targetPos.z()); vec.emplace_back(std::make_pair(sourceTuple,
+      targetTuple));
+      */
+    }
+    drawer->drawEdges(vec);
     std::string test = " test ";
-    drawer->drawEdgeMidpoints2D(graph->get3DEdgePositions(), test,
-                                camera->getCameraPos());
+    drawer->drawEdgeMidpoints2D(vec, lables, camera->getCameraPos());
   }
 
 private:

@@ -12,11 +12,20 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
 
+#include <boost/geometry.hpp>
+#include <boost/geometry/geometries/point.hpp>
+#include <boost/geometry/geometries/point_xyz.hpp>
 #include <boost/graph/circle_layout.hpp>
 #include <boost/graph/fruchterman_reingold.hpp>
 #include <boost/graph/random_layout.hpp>
+
+#include <optional>
+#include <type_traits>
+
 #include <stdexcept>
 #include <vector>
+
+namespace graph_impl_details {
 
 template <typename T, typename = void>
 struct is_number_like : std::false_type {};
@@ -34,6 +43,16 @@ template <typename VertexProperty, typename EdgeProperty> struct IGraphTraits {
       typename boost::graph_traits<BoostGraph>::vertex_descriptor;
   using edge_descriptor =
       typename boost::graph_traits<BoostGraph>::edge_descriptor;
+
+  using Boost3DPoint =
+      boost::geometry::model::point<double, 3, boost::geometry::cs::cartesian>;
+
+  struct EdgeInfo {
+    Boost3DPoint sourcePos;
+    Boost3DPoint targetPos;
+    Boost3DPoint medianPos;
+    int weight;
+  };
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -238,6 +257,10 @@ public:
 
 template <typename VertexProperty, typename EdgeProperty> class ILayoutManager {
 public:
+  using Traits = IGraphTraits<VertexProperty, EdgeProperty>;
+  using EdgeInfo = typename Traits::EdgeInfo;
+  using Boost3DPoint = typename Traits::Boost3DPoint;
+
   virtual ~ILayoutManager() = default;
   virtual void calculateLayout(
       const IGraphStructure<VertexProperty, EdgeProperty> &graph) = 0;
@@ -250,13 +273,8 @@ public:
       std::pair<std::pair<double, double>, std::pair<double, double>>>
   get2DEdgePositions(
       const IGraphStructure<VertexProperty, EdgeProperty> &graph) const = 0;
-  std::vector<std::pair<
-      std::tuple<double, double, double>,
-      std::tuple<
-          double, double,
-          double>>> virtual get3DEdgePositions(const IGraphStructure<VertexProperty,
-                                                                     EdgeProperty>
-                                                   &graph) const = 0;
+  std::vector<EdgeInfo> virtual get3DEdgePositions(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) const = 0;
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -412,6 +430,8 @@ public:
 };
 #endif
 
+#if 0
+
 template <typename VertexProperty, typename EdgeProperty>
 class CircleLayout : public ILayoutManager<VertexProperty, EdgeProperty> {
 private:
@@ -484,12 +504,10 @@ public:
     return res;
   }
 
-  std::vector<std::pair<std::tuple<double, double, double>,
-                        std::tuple<double, double, double>>>
+  std::vector<EdgeInfo>
   get3DEdgePositions(const IGraphStructure<VertexProperty, EdgeProperty> &graph)
       const override {
-    std::vector<std::pair<std::tuple<double, double, double>,
-                          std::tuple<double, double, double>>>
+    std::vector<EdgeInfo>
         edgePositions;
     const auto &g = graph.getBoostGraph();
 
@@ -509,6 +527,7 @@ public:
     return edgePositions;
   }
 };
+#endif
 
 template <typename VertexProperty, typename EdgeProperty>
 class Cube3DLayout : public ILayoutManager<VertexProperty, EdgeProperty> {
@@ -517,7 +536,14 @@ private:
   double sideLength;
   double centerX, centerY, centerZ;
 
+private:
+  using BaseClass = ILayoutManager<VertexProperty, EdgeProperty>;
+  using Traits = typename BaseClass::Traits;
+
 public:
+  using typename BaseClass::Boost3DPoint;
+  using typename BaseClass::EdgeInfo;
+
   Cube3DLayout(double sideLength, double centerX, double centerY,
                double centerZ)
       : sideLength(sideLength), centerX(centerX), centerY(centerY),
@@ -561,13 +587,9 @@ public:
     return res;
   }
 
-  std::vector<std::pair<std::tuple<double, double, double>,
-                        std::tuple<double, double, double>>>
-  get3DEdgePositions(
+  std::vector<typename Traits::EdgeInfo> get3DEdgePositions(
       const IGraphStructure<VertexProperty, EdgeProperty> &graph) const {
-    std::vector<std::pair<std::tuple<double, double, double>,
-                          std::tuple<double, double, double>>>
-        edgePositions;
+    std::vector<typename Traits::EdgeInfo> edgePositions;
     const auto &g = graph.getBoostGraph();
 
     auto edges = boost::edges(g);
@@ -575,12 +597,29 @@ public:
       auto source = boost::source(*it, g);
       auto target = boost::target(*it, g);
 
-      const auto &sourcePos = positions[source];
-      const auto &targetPos = positions[target];
+      typename Traits::EdgeInfo edgeInfo;
 
-      edgePositions.emplace_back(
-          std::make_tuple(sourcePos[0], sourcePos[1], sourcePos[2]),
-          std::make_tuple(targetPos[0], targetPos[1], targetPos[2]));
+      // Get source position
+      const auto &sourcePos = positions[source];
+      edgeInfo.sourcePos = typename Traits::Boost3DPoint(
+          sourcePos[0], sourcePos[1], sourcePos[2]);
+
+      // Get target position
+      const auto &targetPos = positions[target];
+      edgeInfo.targetPos = typename Traits::Boost3DPoint(
+          targetPos[0], targetPos[1], targetPos[2]);
+
+      // Calculate median position
+      edgeInfo.medianPos =
+          typename Traits::Boost3DPoint((sourcePos[0] + targetPos[0]) / 2.0,
+                                        (sourcePos[1] + targetPos[1]) / 2.0,
+                                        (sourcePos[2] + targetPos[2]) / 2.0);
+
+      auto weight_map = boost::get(boost::edge_weight_t(), g);
+
+      edgeInfo.weight = boost::get(boost::edge_weight_t(), g, *it);
+
+      edgePositions.push_back(edgeInfo);
     }
 
     return edgePositions;
@@ -609,60 +648,77 @@ public:
     return edgePositions;
   }
 };
+} // namespace graph_impl_details
 
-template <typename VertexProperty = boost::no_property,
+template <typename VertexProperty,
           typename EdgeProperty = boost::property<boost::edge_weight_t, int>>
 class Graph {
 private:
-  std::unique_ptr<IGraphStructure<VertexProperty, EdgeProperty>> structure;
-  std::unique_ptr<IVertexOperations<VertexProperty, EdgeProperty>> vertexOps;
-  std::unique_ptr<IEdgeOperations<VertexProperty, EdgeProperty>> edgeOps;
-  std::unique_ptr<IRandomSelector<VertexProperty, EdgeProperty>> randomSelector;
-  std::unique_ptr<ILayoutManager<VertexProperty, EdgeProperty>> layoutManager;
+  std::unique_ptr<
+      graph_impl_details::IGraphStructure<VertexProperty, EdgeProperty>>
+      structure;
+  std::unique_ptr<
+      graph_impl_details::IVertexOperations<VertexProperty, EdgeProperty>>
+      vertexOps;
+  std::unique_ptr<
+      graph_impl_details::IEdgeOperations<VertexProperty, EdgeProperty>>
+      edgeOps;
+  std::unique_ptr<
+      graph_impl_details::IRandomSelector<VertexProperty, EdgeProperty>>
+      randomSelector;
+  std::unique_ptr<
+      graph_impl_details::ILayoutManager<VertexProperty, EdgeProperty>>
+      layoutManager;
 
 public:
-  using Traits = IGraphTraits<VertexProperty, EdgeProperty>;
+  using Traits = graph_impl_details::IGraphTraits<VertexProperty, EdgeProperty>;
   using vertex_descriptor = typename Traits::vertex_descriptor;
   using edge_descriptor = typename Traits::edge_descriptor;
   using BoostGraph = typename Traits::BoostGraph;
+  using Boost3DPoint = typename Traits::Boost3DPoint;
+  using EdgeInfo = typename Traits::EdgeInfo;
 
 public:
   Graph()
-      : structure(std::make_unique<
-                  BoostGraphStructure<VertexProperty, EdgeProperty>>()),
-        vertexOps(std::make_unique<
-                  BoostVertexOperations<VertexProperty, EdgeProperty>>(
-            *static_cast<BoostGraphStructure<VertexProperty, EdgeProperty> *>(
-                structure.get()))),
-        edgeOps(std::make_unique<
-                BoostEdgeOperations<VertexProperty, EdgeProperty>>(
-            *static_cast<BoostGraphStructure<VertexProperty, EdgeProperty> *>(
-                structure.get()))),
-        randomSelector(std::make_unique<
-                       DefaultRandomSelector<VertexProperty, EdgeProperty>>()) {
-  }
+      : structure(std::make_unique<graph_impl_details::BoostGraphStructure<
+                      VertexProperty, EdgeProperty>>()),
+        vertexOps(std::make_unique<graph_impl_details::BoostVertexOperations<
+                      VertexProperty, EdgeProperty>>(
+            *static_cast<graph_impl_details::BoostGraphStructure<
+                VertexProperty, EdgeProperty> *>(structure.get()))),
+        edgeOps(std::make_unique<graph_impl_details::BoostEdgeOperations<
+                    VertexProperty, EdgeProperty>>(
+            *static_cast<graph_impl_details::BoostGraphStructure<
+                VertexProperty, EdgeProperty> *>(structure.get()))),
+        randomSelector(
+            std::make_unique<graph_impl_details::DefaultRandomSelector<
+                VertexProperty, EdgeProperty>>()) {}
 
   void setLayoutManager(
-      std::unique_ptr<ILayoutManager<VertexProperty, EdgeProperty>> manager) {
+      std::unique_ptr<
+          graph_impl_details::ILayoutManager<VertexProperty, EdgeProperty>>
+          manager) {
     layoutManager = std::move(manager);
   }
 
   void setRectangleLayoutManager(int width, int height) {
-    layoutManager = std::make_unique<
-        FruchtermanReingoldLayout<VertexProperty, EdgeProperty>>(width, height);
+    //  layoutManager =
+    //      std::make_unique<graph_impl_details::FruchtermanReingoldLayout<
+    //          VertexProperty, EdgeProperty>>(width, height);
   }
 
   void setCircularLayoutManager(double radius, double centerX, double centerY) {
-    layoutManager =
-        std::make_unique<CircleLayout<VertexProperty, EdgeProperty>>(
-            radius, centerX, centerY);
+
+    //    layoutManager = std::make_unique<
+    //        graph_impl_details::CircleLayout<VertexProperty, EdgeProperty>>(
+    //        radius, centerX, centerY);
   }
 
   void setCube3DLayoutManager(double sideLength, double centerX, double centerY,
                               double centerZ) {
-    layoutManager =
-        std::make_unique<Cube3DLayout<VertexProperty, EdgeProperty>>(
-            sideLength, centerX, centerY, centerZ);
+    layoutManager = std::make_unique<
+        graph_impl_details::Cube3DLayout<VertexProperty, EdgeProperty>>(
+        sideLength, centerX, centerY, centerZ);
   }
 
   void calculateLayout() {
@@ -693,9 +749,7 @@ public:
     return {};
   }
 
-  std::vector<std::pair<std::tuple<double, double, double>,
-                        std::tuple<double, double, double>>>
-  get3DEdgePositions() const {
+  std::vector<EdgeInfo> get3DEdgePositions() const {
     if (layoutManager) {
       return layoutManager->get3DEdgePositions(*structure);
     }
@@ -743,114 +797,8 @@ public:
   }
 
   const BoostGraph &getBoostGraph() const {
-    return static_cast<
-               const BoostGraphStructure<VertexProperty, EdgeProperty> *>(
-               structure.get())
+    return static_cast<const graph_impl_details::BoostGraphStructure<
+        VertexProperty, EdgeProperty> *>(structure.get())
         ->getBoostGraph();
   }
 };
-
-#if 0
-template <typename VertexProperty = boost::no_property,
-          typename EdgeProperty = boost::no_property>
-class Graph {
-private:
-  using BoostGraph =
-      boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
-                            VertexProperty, EdgeProperty>;
-  BoostGraph g;
-
-public:
-  using vertex_descriptor =
-      typename boost::graph_traits<BoostGraph>::vertex_descriptor;
-  using edge_descriptor =
-      typename boost::graph_traits<BoostGraph>::edge_descriptor;
-
-public:
-  Graph() = default;
-
-  vertex_descriptor addVertex(const VertexProperty &vp = VertexProperty()) {
-    return boost::add_vertex(vp, g);
-  }
-
-  std::pair<edge_descriptor, bool>
-  addEdge(vertex_descriptor source, vertex_descriptor target,
-          const EdgeProperty &ep = EdgeProperty()) {
-    return boost::add_edge(source, target, ep, g);
-  }
-
-  void removeVertex(vertex_descriptor v) { boost::remove_vertex(v, g); }
-
-  void removeEdge(vertex_descriptor source, vertex_descriptor target) {
-    boost::remove_edge(source, target, g);
-  }
-
-  std::size_t vertexCount() const { return boost::num_vertices(g); }
-
-  std::size_t edgeCount() const { return boost::num_edges(g); }
-
-  std::vector<vertex_descriptor> getVertices() const {
-    std::vector<vertex_descriptor> vertices;
-    auto vpair = boost::vertices(g);
-    for (auto vit = vpair.first; vit != vpair.second; ++vit) {
-      vertices.push_back(*vit);
-    }
-    return vertices;
-  }
-
-  std::vector<edge_descriptor> getEdges() const {
-    std::vector<edge_descriptor> edges;
-    auto epair = boost::edges(g);
-    for (auto eit = epair.first; eit != epair.second; ++eit) {
-      edges.push_back(*eit);
-    }
-    return edges;
-  }
-
-  VertexProperty &getVertexProperty(vertex_descriptor v) { return g[v]; }
-
-  EdgeProperty &getEdgeProperty(edge_descriptor e) { return g[e]; }
-
-  bool hasEdge(vertex_descriptor source, vertex_descriptor target) const {
-    return boost::edge(source, target, g).second;
-  }
-
-  std::vector<vertex_descriptor>
-  getAdjacentVertices(vertex_descriptor v) const {
-    std::vector<vertex_descriptor> adjacent;
-    auto adjPair = boost::adjacent_vertices(v, g);
-    for (auto it = adjPair.first; it != adjPair.second; ++it) {
-      adjacent.push_back(*it);
-    }
-    return adjacent;
-  }
-
-  const BoostGraph &getBoostGraph() const { return g; }
-
-  BoostGraph &getBoostGraph() { return g; }
-
-  vertex_descriptor getRandomVertex() const {
-    if (vertexCount() == 0) {
-      throw std::runtime_error("Graph is empty");
-    }
-
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::default_random_engine generator(seed);
-    std::uniform_int_distribution<std::size_t> distribution(0,
-                                                            vertexCount() - 1);
-
-    auto vertices = getVertices();
-    return vertices[distribution(generator)];
-  }
-
-  std::optional<edge_descriptor>
-  getEdgeConnecting(vertex_descriptor source, vertex_descriptor target) const {
-    auto edge_pair = boost::edge(source, target, g);
-    if (edge_pair.second) {
-      return edge_pair.first;
-    }
-    return std::nullopt;
-  }
-};
-
-#endif

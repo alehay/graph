@@ -10,6 +10,10 @@ GraphRenderer<std::string, boost::property<boost::edge_weight_t, int>>
     *renderer;
 Graph<std::string, boost::property<boost::edge_weight_t, int>> *g;
 
+std::random_device rd;                        // Seed source
+std::mt19937 gen(rd());                       // Mersenne Twister engine
+std::uniform_int_distribution<> dis(10, 100); //
+
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   Width = width;
   Height = height;
@@ -30,21 +34,24 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
                   int mods) {
   if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
     glfwSetWindowShouldClose(window, GLFW_TRUE);
+
   if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
     for (int i = 0; i < 10; i++) {
       auto v = g->addVertex(std::to_string(tic++));
       auto rnd_1 = g->getRandomVertex();
       auto rnd_2 = g->getRandomVertex();
-      g->addEdge(v, rnd_1);
+      g->addEdge(v, rnd_1, dis(gen));
+
       if (g->getVertices().size() > 20) {
-        g->addEdge(v, rnd_2, i);
+        int random_weight = dis(gen); // Generate random weight
+        g->addEdge(v, rnd_2, random_weight);
       }
     }
     g->calculateLayout();
   }
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
 
   glutInit(&argc, argv);
 
@@ -86,12 +93,7 @@ int main(int argc, char* argv[]) {
                             5.0); // Adjust these values as needed
 
   // Add initial vertices and edges
-  for (int i = 0; i < 10; ++i) {
-    g->addVertex(std::to_string(i));
-  }
-  for (int i = 0; i < 15; ++i) {
-    g->addEdge(g->getRandomVertex(), g->getRandomVertex());
-  }
+
   g->calculateLayout();
 
   renderer = new GraphRenderer<std::string,
