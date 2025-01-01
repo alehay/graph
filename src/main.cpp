@@ -2,6 +2,7 @@
 #include "render/graphRenderer.hpp"
 #include <GL/glew.h>
 
+#include "graphLoader.hpp"
 #include <GLFW/glfw3.h>
 #include <iostream>
 
@@ -36,15 +37,23 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
     glfwSetWindowShouldClose(window, GLFW_TRUE);
 
   if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 2; i++) {
       auto v = g->addVertex(std::to_string(tic++));
       auto rnd_1 = g->getRandomVertex();
       auto rnd_2 = g->getRandomVertex();
-      g->addEdge(v, rnd_1, dis(gen));
+
+      // Check to avoid adding a self-loop for rnd_1
+      if (v != rnd_1) {
+        g->addEdge(v, rnd_1, dis(gen));
+      }
 
       if (g->getVertices().size() > 20) {
         int random_weight = dis(gen); // Generate random weight
-        g->addEdge(v, rnd_2, random_weight);
+
+        // Check to avoid adding a self-loop for rnd_2
+        if (v != rnd_2) {
+          g->addEdge(v, rnd_2, random_weight);
+        }
       }
     }
     g->calculateLayout();
@@ -52,6 +61,22 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
 }
 
 int main(int argc, char *argv[]) {
+
+  std::string file_path = "./crosstable.txt";
+  std::vector<int> vertices;
+  std::map<int, std::vector<int>> adj_list;
+
+  read_table(file_path, vertices, adj_list);
+
+  std::cout << "table test " << std::endl;
+
+  for (int i = 0; i < vertices.size(); i++) {
+    std::cout << vertices[i] << " ";
+    for (int j = 0; j < adj_list[vertices[i]].size(); j++) {
+      std::cout << adj_list[vertices[i]][j] << " ";
+    }
+    std::cout << std::endl;
+  }
 
   glutInit(&argc, argv);
 
@@ -89,6 +114,7 @@ int main(int argc, char *argv[]) {
   }
 
   g = new Graph<std::string>;
+  g->populateFromAdjacencyList(vertices, adj_list);
   g->setCube3DLayoutManager(7.0, 5.0, 5.0,
                             5.0); // Adjust these values as needed
 

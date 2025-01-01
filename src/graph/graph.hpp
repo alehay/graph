@@ -72,6 +72,9 @@ public:
   virtual std::vector<vertex_descriptor>
   getAdjacentVertices(vertex_descriptor v) const = 0;
   virtual const Traits::BoostGraph &getBoostGraph() const = 0;
+  virtual void populateFromAdjacencyList(
+      const std::vector<int> &vertices,
+      const std::map<int, std::vector<int>> &adj_list) = 0;
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -126,6 +129,43 @@ public:
   // Additional method to access the underlying Boost graph
   BoostGraph &getBoostGraph() { return g; }
   const BoostGraph &getBoostGraph() const override { return g; }
+
+  void populateFromAdjacencyList(
+      const std::vector<int> &vertices,
+      const std::map<int, std::vector<int>> &adj_list) override {
+    // Clear existing graph
+    g.clear();
+
+    // Add vertices
+    std::map<int, vertex_descriptor> vertex_map;
+    for (int v : vertices) {
+      vertex_descriptor vd = boost::add_vertex(g);
+      vertex_map[v] = vd;
+    }
+
+    // Add edges with weights
+    for (const auto &entry : adj_list) {
+      int source = entry.first;
+      const std::vector<int> &targets = entry.second;
+
+      for (size_t i = 0; i < targets.size(); ++i) {
+        int target = vertices[i];
+        int weight = targets[i];
+
+        if (weight > 0) { // Assuming weight 0 means no edge
+          edge_descriptor ed;
+          bool inserted;
+          boost::tie(ed, inserted) =
+              boost::add_edge(vertex_map[source], vertex_map[target], g);
+
+          if (inserted) {
+            // Set edge weight
+            boost::put(boost::edge_weight, g, ed, weight);
+          }
+        }
+      }
+    }
+  }
 };
 
 template <typename VertexProperty, typename EdgeProperty>
@@ -564,12 +604,13 @@ public:
     }
   };
 
-  
-void calculateLayout(const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
+  void calculateLayout(
+      const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
     // 1) Extract the underlying Boost graph
     const auto &g = graph.getBoostGraph();
     auto numVerts = boost::num_vertices(g);
-    if (numVerts == 0) return; // nothing to do
+    if (numVerts == 0)
+      return; // nothing to do
 
     // 2) We'll store new positions in a temporary vector of Point3D
     std::vector<Point3D> newPositions(numVerts);
@@ -591,245 +632,247 @@ void calculateLayout(const IGraphStructure<VertexProperty, EdgeProperty> &graph)
     double k = sideLength / std::cbrt(static_cast<double>(numVerts));
 
     // 5) Set iteration count, initial temperature, etc.
-    const int iterations = 200;           // Increase for a "more settled" layout
-    double t0 = k * 2;                    // Start temperature (tweak as needed)
-    double minX = 0.0,  maxX = sideLength; 
-    double minY = 0.0,  maxY = sideLength; 
-    double minZ = 0.0,  maxZ = sideLength; 
+    const int iterations = 200; // Increase for a "more settled" layout
+    double t0 = k * 2;          // Start temperature (tweak as needed)
+    double minX = 0.0, maxX = sideLength;
+    double minY = 0.0, maxY = sideLength;
+    double minZ = 0.0, maxZ = sideLength;
 
     // 6) For convenience, get an edge_weight property map
     auto weightMap = boost::get(boost::edge_weight_t(), g);
 
     // 7) Force-directed loop
     for (int iter = 0; iter < iterations; ++iter) {
-        // a) We'll reduce temperature linearly each iteration
-        double t = t0 * (1.0 - (double)iter / (double)iterations);
+      // a) We'll reduce temperature linearly each iteration
+      double t = t0 * (1.0 - (double)iter / (double)iterations);
 
-        // b) Initialize a force accumulator for each vertex
-        std::vector<Point3D> forces(numVerts, Point3D(0, 0, 0));
+      // b) Initialize a force accumulator for each vertex
+      std::vector<Point3D> forces(numVerts, Point3D(0, 0, 0));
 
-        for (size_t i = 0; i < numVerts; ++i) {
-            for (size_t j = i + 1; j < numVerts; ++j) {
-                Point3D diff = newPositions[i] - newPositions[j];
-                double distSq = diff.x*diff.x + diff.y*diff.y + diff.z*diff.z;
-                if (distSq < 1e-12) {
-                    // Avoid division by zero => jiggle them slightly
-                    // or just skip
-                    distSq = 1e-12;
-                }
-                double dist = std::sqrt(distSq);
+      for (size_t i = 0; i < numVerts; ++i) {
+        for (size_t j = i + 1; j < numVerts; ++j) {
+          Point3D diff = newPositions[i] - newPositions[j];
+          double distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+          if (distSq < 1e-12) {
+            // Avoid division by zero => jiggle them slightly
+            // or just skip
+            distSq = 1e-12;
+          }
+          double dist = std::sqrt(distSq);
 
-                // Repulsive force = k^2 / d
-                double repForce = (k * k) / dist;
+          // Repulsive force = k^2 / d
+          double repForce = (k * k) / dist;
 
-                // Direction
-                double dx = diff.x / dist;
-                double dy = diff.y / dist;
-                double dz = diff.z / dist;
+          // Direction
+          double dx = diff.x / dist;
+          double dy = diff.y / dist;
+          double dz = diff.z / dist;
 
-                // Apply to both
-                forces[i].x += repForce * dx;
-                forces[i].y += repForce * dy;
-                forces[i].z += repForce * dz;
-                forces[j].x -= repForce * dx;
-                forces[j].y -= repForce * dy;
-                forces[j].z -= repForce * dz;
-            }
+          // Apply to both
+          forces[i].x += repForce * dx;
+          forces[i].y += repForce * dy;
+          forces[i].z += repForce * dz;
+          forces[j].x -= repForce * dx;
+          forces[j].y -= repForce * dy;
+          forces[j].z -= repForce * dz;
+        }
+      }
+
+      // --- (ii) ATTRACTIVE FORCES (for edges) ---
+      auto edgesRange = boost::edges(g);
+      for (auto eIt = edgesRange.first; eIt != edgesRange.second; ++eIt) {
+        auto src = boost::source(*eIt, g);
+        auto tgt = boost::target(*eIt, g);
+
+        // Weighted edge
+        auto w = weightMap[*eIt];
+        if (w <= 0)
+          w = 1; // handle non-positive weights
+
+        Point3D diff = newPositions[src] - newPositions[tgt];
+        double distSq = diff.x * diff.x + diff.y * diff.y + diff.z * diff.z;
+        if (distSq < 1e-12) {
+          distSq = 1e-12;
+        }
+        double dist = std::sqrt(distSq);
+
+        // Weighted attraction: F_attr = w * (d^2 / k)
+        // The heavier the weight, the stronger the pull
+        double attrForce = w * (distSq / k);
+
+        // Direction
+        double dx = diff.x / dist;
+        double dy = diff.y / dist;
+        double dz = diff.z / dist;
+
+        // Apply it: push src ← and tgt →
+        forces[src].x -= attrForce * dx;
+        forces[src].y -= attrForce * dy;
+        forces[src].z -= attrForce * dz;
+        forces[tgt].x += attrForce * dx;
+        forces[tgt].y += attrForce * dy;
+        forces[tgt].z += attrForce * dz;
+      }
+
+      // --- (iii) Update positions, bounded by temperature and the cube ---
+      for (size_t i = 0; i < numVerts; ++i) {
+        // length of the net force vector
+        double fx = forces[i].x;
+        double fy = forces[i].y;
+        double fz = forces[i].z;
+        double fDist = std::sqrt(fx * fx + fy * fy + fz * fz);
+        if (fDist < 1e-12) {
+          // no movement
+          continue;
         }
 
-        // --- (ii) ATTRACTIVE FORCES (for edges) ---
-        auto edgesRange = boost::edges(g);
-        for (auto eIt = edgesRange.first; eIt != edgesRange.second; ++eIt) {
-            auto src = boost::source(*eIt, g);
-            auto tgt = boost::target(*eIt, g);
+        // Limit movement by temperature
+        double limitedDist = std::min(fDist, t); // clamp
+        // direction
+        fx = fx / fDist * limitedDist;
+        fy = fy / fDist * limitedDist;
+        fz = fz / fDist * limitedDist;
 
-            // Weighted edge
-            auto w = weightMap[*eIt];
-            if (w <= 0) w = 1; // handle non-positive weights
+        // Move
+        newPositions[i].x += fx;
+        newPositions[i].y += fy;
+        newPositions[i].z += fz;
 
-            Point3D diff = newPositions[src] - newPositions[tgt];
-            double distSq = diff.x*diff.x + diff.y*diff.y + diff.z*diff.z;
-            if (distSq < 1e-12) {
-                distSq = 1e-12;
-            }
-            double dist = std::sqrt(distSq);
-
-            // Weighted attraction: F_attr = w * (d^2 / k)
-            // The heavier the weight, the stronger the pull
-            double attrForce = w * (distSq / k);
-
-            // Direction
-            double dx = diff.x / dist;
-            double dy = diff.y / dist;
-            double dz = diff.z / dist;
-
-            // Apply it: push src ← and tgt →
-            forces[src].x -= attrForce * dx;
-            forces[src].y -= attrForce * dy;
-            forces[src].z -= attrForce * dz;
-            forces[tgt].x += attrForce * dx;
-            forces[tgt].y += attrForce * dy;
-            forces[tgt].z += attrForce * dz;
-        }
-
-        // --- (iii) Update positions, bounded by temperature and the cube ---
-        for (size_t i = 0; i < numVerts; ++i) {
-            // length of the net force vector
-            double fx = forces[i].x;
-            double fy = forces[i].y;
-            double fz = forces[i].z;
-            double fDist = std::sqrt(fx*fx + fy*fy + fz*fz);
-            if (fDist < 1e-12) {
-                // no movement
-                continue;
-            }
-
-            // Limit movement by temperature
-            double limitedDist = std::min(fDist, t); // clamp
-            // direction
-            fx = fx / fDist * limitedDist;
-            fy = fy / fDist * limitedDist;
-            fz = fz / fDist * limitedDist;
-
-            // Move
-            newPositions[i].x += fx;
-            newPositions[i].y += fy;
-            newPositions[i].z += fz;
-
-            // Optionally clamp to [0, sideLength]
-            if (newPositions[i].x < minX) newPositions[i].x = minX;
-            if (newPositions[i].x > maxX) newPositions[i].x = maxX;
-            if (newPositions[i].y < minY) newPositions[i].y = minY;
-            if (newPositions[i].y > maxY) newPositions[i].y = maxY;
-            if (newPositions[i].z < minZ) newPositions[i].z = minZ;
-            if (newPositions[i].z > maxZ) newPositions[i].z = maxZ;
-        }
+        // Optionally clamp to [0, sideLength]
+        if (newPositions[i].x < minX)
+          newPositions[i].x = minX;
+        if (newPositions[i].x > maxX)
+          newPositions[i].x = maxX;
+        if (newPositions[i].y < minY)
+          newPositions[i].y = minY;
+        if (newPositions[i].y > maxY)
+          newPositions[i].y = maxY;
+        if (newPositions[i].z < minZ)
+          newPositions[i].z = minZ;
+        if (newPositions[i].z > maxZ)
+          newPositions[i].z = maxZ;
+      }
     }
 
     for (auto &pos : newPositions) {
-        pos.x += centerX - (sideLength / 2.0);
-        pos.y += centerY - (sideLength / 2.0);
-        pos.z += centerZ - (sideLength / 2.0);
+      pos.x += centerX - (sideLength / 2.0);
+      pos.y += centerY - (sideLength / 2.0);
+      pos.z += centerZ - (sideLength / 2.0);
     }
 
     positions.clear();
     positions.reserve(numVerts);
     for (auto &pos : newPositions) {
-        boost::cube_topology<>::point_type p;
-        p[0] = pos.x;
-        p[1] = pos.y;
-        p[2] = pos.z;
-        positions.push_back(p);
+      boost::cube_topology<>::point_type p;
+      p[0] = pos.x;
+      p[1] = pos.y;
+      p[2] = pos.z;
+      positions.push_back(p);
     }
-}
+  }
 
+  /* perplexyty ver
+    void calculateLayout(
+        const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
+      const auto &g = graph.getBoostGraph();
+      std::vector<Point3D> newPositions(boost::num_vertices(g));
 
-/* perplexyty ver
-  void calculateLayout(
-      const IGraphStructure<VertexProperty, EdgeProperty> &graph) override {
-    const auto &g = graph.getBoostGraph();
-    std::vector<Point3D> newPositions(boost::num_vertices(g));
+      // Initialize positions randomly within the cube
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<> dis(0, sideLength);
+      for (auto &pos : newPositions) {
+        pos.x = dis(gen);
+        pos.y = dis(gen);
+        pos.z = dis(gen);
+      }
 
-    // Initialize positions randomly within the cube
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(0, sideLength);
-    for (auto &pos : newPositions) {
-      pos.x = dis(gen);
-      pos.y = dis(gen);
-      pos.z = dis(gen);
-    }
+      // Force-directed layout
+      const int iterations = 100;
+      const double k =
+          sideLength / std::sqrt(boost::num_vertices(g)); // Spring constant
+      const double temperature =
+          sideLength / 10; // Initial temperature for simulated annealing
 
-    // Force-directed layout
-    const int iterations = 100;
-    const double k =
-        sideLength / std::sqrt(boost::num_vertices(g)); // Spring constant
-    const double temperature =
-        sideLength / 10; // Initial temperature for simulated annealing
+      for (int iter = 0; iter < iterations; ++iter) {
+        std::vector<Point3D> forces(newPositions.size());
 
-    for (int iter = 0; iter < iterations; ++iter) {
-      std::vector<Point3D> forces(newPositions.size());
+        // Calculate repulsive forces
+        for (size_t i = 0; i < newPositions.size(); ++i) {
+          for (size_t j = i + 1; j < newPositions.size(); ++j) {
+            auto diff = newPositions[i] - newPositions[j];
+            double distance =
+                std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z *
+    diff.z); if (distance > 0) { double force = k * k / distance; forces[i].x
+    += force * diff.x / distance; forces[i].y += force * diff.y / distance;
+              forces[i].z += force * diff.z / distance;
+              forces[j].x -= force * diff.x / distance;
+              forces[j].y -= force * diff.y / distance;
+              forces[j].z -= force * diff.z / distance;
+            }
+          }
+        }
 
-      // Calculate repulsive forces
-      for (size_t i = 0; i < newPositions.size(); ++i) {
-        for (size_t j = i + 1; j < newPositions.size(); ++j) {
-          auto diff = newPositions[i] - newPositions[j];
+        // Calculate attractive forces
+        auto edges = boost::edges(g);
+        for (auto it = edges.first; it != edges.second; ++it) {
+          auto source = boost::source(*it, g);
+          auto target = boost::target(*it, g);
+          auto weight = boost::get(boost::edge_weight, g, *it);
+
+          auto diff = newPositions[source] - newPositions[target];
           double distance =
               std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
           if (distance > 0) {
-            double force = k * k / distance;
-            forces[i].x += force * diff.x / distance;
-            forces[i].y += force * diff.y / distance;
-            forces[i].z += force * diff.z / distance;
-            forces[j].x -= force * diff.x / distance;
-            forces[j].y -= force * diff.y / distance;
-            forces[j].z -= force * diff.z / distance;
+            double force = distance * distance / (k * weight);
+            forces[source].x -= force * diff.x / distance;
+            forces[source].y -= force * diff.y / distance;
+            forces[source].z -= force * diff.z / distance;
+            forces[target].x += force * diff.x / distance;
+            forces[target].y += force * diff.y / distance;
+            forces[target].z += force * diff.z / distance;
           }
         }
-      }
 
-      // Calculate attractive forces
-      auto edges = boost::edges(g);
-      for (auto it = edges.first; it != edges.second; ++it) {
-        auto source = boost::source(*it, g);
-        auto target = boost::target(*it, g);
-        auto weight = boost::get(boost::edge_weight, g, *it);
-
-        auto diff = newPositions[source] - newPositions[target];
-        double distance =
-            std::sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-        if (distance > 0) {
-          double force = distance * distance / (k * weight);
-          forces[source].x -= force * diff.x / distance;
-          forces[source].y -= force * diff.y / distance;
-          forces[source].z -= force * diff.z / distance;
-          forces[target].x += force * diff.x / distance;
-          forces[target].y += force * diff.y / distance;
-          forces[target].z += force * diff.z / distance;
+        // Apply forces
+        double t =
+            temperature * (1 - static_cast<double>(iter) / iterations); //
+    Cooling for (size_t i = 0; i < newPositions.size(); ++i) { double
+    displacement_x = std::min(std::abs(forces[i].x), t) * (forces[i].x < 0 ?
+    -1 : 1); double displacement_y = std::min(std::abs(forces[i].y), t) *
+    (forces[i].y < 0 ? -1 : 1); double displacement_z =
+              std::min(std::abs(forces[i].z), t) * (forces[i].z < 0 ? -1 : 1);
+          newPositions[i].x += displacement_x;
+          newPositions[i].y += displacement_y;
+          newPositions[i].z += displacement_z;
+          newPositions[i].x =
+              std::max(0.0, std::min(sideLength, newPositions[i].x));
+          newPositions[i].y =
+              std::max(0.0, std::min(sideLength, newPositions[i].y));
+          newPositions[i].z =
+              std::max(0.0, std::min(sideLength, newPositions[i].z));
         }
       }
 
-      // Apply forces
-      double t =
-          temperature * (1 - static_cast<double>(iter) / iterations); // Cooling
-      for (size_t i = 0; i < newPositions.size(); ++i) {
-        double displacement_x =
-            std::min(std::abs(forces[i].x), t) * (forces[i].x < 0 ? -1 : 1);
-        double displacement_y =
-            std::min(std::abs(forces[i].y), t) * (forces[i].y < 0 ? -1 : 1);
-        double displacement_z =
-            std::min(std::abs(forces[i].z), t) * (forces[i].z < 0 ? -1 : 1);
-        newPositions[i].x += displacement_x;
-        newPositions[i].y += displacement_y;
-        newPositions[i].z += displacement_z;
-        newPositions[i].x =
-            std::max(0.0, std::min(sideLength, newPositions[i].x));
-        newPositions[i].y =
-            std::max(0.0, std::min(sideLength, newPositions[i].y));
-        newPositions[i].z =
-            std::max(0.0, std::min(sideLength, newPositions[i].z));
+      // Adjust positions to be centered at (centerX, centerY, centerZ)
+      for (auto &pos : newPositions) {
+        pos.x += centerX - sideLength / 2;
+        pos.y += centerY - sideLength / 2;
+        pos.z += centerZ - sideLength / 2;
+      }
+
+      // Update the positions vector
+      positions.clear();
+      positions.reserve(newPositions.size());
+      for (const auto &pos : newPositions) {
+        boost::cube_topology<>::point_type point;
+        point[0] = pos.x;
+        point[1] = pos.y;
+        point[2] = pos.z;
+        positions.push_back(point);
       }
     }
-
-    // Adjust positions to be centered at (centerX, centerY, centerZ)
-    for (auto &pos : newPositions) {
-      pos.x += centerX - sideLength / 2;
-      pos.y += centerY - sideLength / 2;
-      pos.z += centerZ - sideLength / 2;
-    }
-
-    // Update the positions vector
-    positions.clear();
-    positions.reserve(newPositions.size());
-    for (const auto &pos : newPositions) {
-      boost::cube_topology<>::point_type point;
-      point[0] = pos.x;
-      point[1] = pos.y;
-      point[2] = pos.z;
-      positions.push_back(point);
-    }
-  }
-  */
+    */
 
   std::vector<std::tuple<double, double, double>> get3DVertexPositions() const {
     std::vector<std::tuple<double, double, double>> res;
@@ -1054,6 +1097,14 @@ public:
 
   std::vector<edge_descriptor> getEdges() const {
     return structure->getEdges();
+  }
+
+  void
+  populateFromAdjacencyList(const std::vector<int> &vertices,
+                            const std::map<int, std::vector<int>> &adj_list)
+
+  {
+    structure->populateFromAdjacencyList(vertices, adj_list);
   }
 
   const BoostGraph &getBoostGraph() const {
