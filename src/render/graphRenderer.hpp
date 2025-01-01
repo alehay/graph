@@ -350,17 +350,9 @@ public:
 
       lables.emplace_back(std::to_string(edgeInfo.weight));
 
-      // Alternatively, if Boost3DPoint has member functions x(), y(), z():
-      /*
-      auto sourceTuple = std::make_tuple(edgeInfo.sourcePos.x(),
-      edgeInfo.sourcePos.y(), edgeInfo.sourcePos.z()); auto targetTuple =
-      std::make_tuple(edgeInfo.targetPos.x(), edgeInfo.targetPos.y(),
-      edgeInfo.targetPos.z()); vec.emplace_back(std::make_pair(sourceTuple,
-      targetTuple));
-      */
+
     }
     drawer->drawEdges(vec);
-    std::string test = " test ";
     drawer->drawEdgeMidpoints2D(vec, lables, camera->getCameraPos());
   }
 
