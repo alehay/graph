@@ -74,8 +74,9 @@ class IOpenGLDrawer {
 public:
   virtual ~IOpenGLDrawer() = default;
 
-  virtual void drawVertices(
-      const std::vector<std::tuple<double, double, double>> &positions) = 0;
+  virtual void
+  drawVertices(const std::vector<std::tuple<double, double, double>> &positions,
+               const glm::vec3 &cameraPos) = 0;
 
   virtual void
   drawEdges(const std::vector<std::pair<std::tuple<double, double, double>,
@@ -89,28 +90,32 @@ public:
 
 class BasicOpenGLDrawer : public IOpenGLDrawer {
 public:
-  void drawVertices(const std::vector<std::tuple<double, double, double>>
-                        &positions) override {
-    // Enable point smoothing and blending to get a nicer circle-like point
+  void
+  drawVertices(const std::vector<std::tuple<double, double, double>> &positions,
+               const glm::vec3 &cameraPos) override {
     glEnable(GL_POINT_SMOOTH);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Increase point size
-    glPointSize(12.0f);
-
-    // Set vertex color to a more vivid red
     glColor3f(0.8f, 0.2f, 0.2f);
 
-    glBegin(GL_POINTS);
     for (const auto &pos : positions) {
-      glVertex3f(static_cast<float>(std::get<0>(pos)),
-                 static_cast<float>(std::get<1>(pos)),
-                 static_cast<float>(std::get<2>(pos)));
-    }
-    glEnd();
+      glm::vec3 vertexPos(std::get<0>(pos), std::get<1>(pos), std::get<2>(pos));
+      float distance = glm::distance(cameraPos, vertexPos);
 
-    // Disable blending / smoothing afterwards if you don’t need them further
+      // Enhanced point size calculation
+      float pointSize = 18.0f / (1.0f + distance * distance * 0.01f);
+      pointSize = glm::clamp(pointSize, 1.0f, 14.0f);
+
+      std::cout << pointSize << std::endl;
+
+      glPointSize(pointSize);
+
+      glBegin(GL_POINTS);
+      glVertex3f(vertexPos.x, vertexPos.y, vertexPos.z);
+      glEnd();
+    }
+
     glDisable(GL_BLEND);
     glDisable(GL_POINT_SMOOTH);
   }
@@ -322,7 +327,7 @@ public:
     glLoadMatrixf(glm::value_ptr(view));
 
     // Delegate drawing
-    drawer->drawVertices(graph->get3DVertexPositions());
+    drawer->drawVertices(graph->get3DVertexPositions(), camera->getCameraPos());
 
     std::vector<std::pair<std::tuple<double, double, double>,
                           std::tuple<double, double, double>>>
@@ -349,8 +354,6 @@ public:
       vec.emplace_back(std::make_pair(sourceTuple, targetTuple));
 
       lables.emplace_back(std::to_string(edgeInfo.weight));
-
-
     }
     drawer->drawEdges(vec);
     drawer->drawEdgeMidpoints2D(vec, lables, camera->getCameraPos());

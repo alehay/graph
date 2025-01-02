@@ -615,16 +615,24 @@ public:
     // 2) We'll store new positions in a temporary vector of Point3D
     std::vector<Point3D> newPositions(numVerts);
 
-    // 3) Randomly initialize positions within the [0, sideLength] cube
-    std::random_device rd;
-    std::mt19937 gen(0);
-    std::uniform_real_distribution<> dis(0.0, sideLength);
-    for (auto &pos : newPositions) {
-      pos.x = dis(gen);
-      pos.y = dis(gen);
-      pos.z = dis(gen);
+    std::size_t iter_pos = 0;
+    std::size_t exist_pos = positions.size();
+
+    for(; iter_pos < numVerts and iter_pos <  positions.size() ; ++iter_pos) {
+        newPositions[iter_pos].x = positions[iter_pos][0];
+        newPositions[iter_pos].y = positions[iter_pos][1];
+        newPositions[iter_pos].z = positions[iter_pos][2];
     }
 
+    if(iter_pos < numVerts) {
+      std::mt19937 gen(0);
+      std::uniform_real_distribution<> dis(0.0, sideLength);
+      for( ; iter_pos < numVerts; ++iter_pos) {
+        newPositions[iter_pos].x = dis(gen);
+        newPositions[iter_pos].y = dis(gen);
+        newPositions[iter_pos].z = dis(gen);
+      }
+    }
     //  Determine the "ideal" edge length k for 3D
     //    We'll do something simple here:
     //    k = sideLength / cbrt(numVerts).
@@ -632,7 +640,7 @@ public:
     double k = sideLength / std::cbrt(static_cast<double>(numVerts));
 
     // 5) Set iteration count, initial temperature, etc.
-    const int iterations = 200; // Increase for a "more settled" layout
+    const int iterations = 100; // Increase for a "more settled" layout
     double t0 = k * 2;          // Start temperature (tweak as needed)
     double minX = 0.0, maxX = sideLength;
     double minY = 0.0, maxY = sideLength;
@@ -642,6 +650,7 @@ public:
     auto weightMap = boost::get(boost::edge_weight_t(), g);
 
     // 7) Force-directed loop
+    // change 0 to extist pos 
     for (int iter = 0; iter < iterations; ++iter) {
       // a) We'll reduce temperature linearly each iteration
       double t = t0 * (1.0 - (double)iter / (double)iterations);
