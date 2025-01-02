@@ -13,7 +13,7 @@ Graph<std::string, boost::property<boost::edge_weight_t, int>> *g;
 
 std::random_device rd;                        // Seed source
 std::mt19937 gen(rd());                       // Mersenne Twister engine
-std::uniform_int_distribution<> dis(10, 100); //
+std::uniform_int_distribution<> dis(1, 20);
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   Width = width;
@@ -56,7 +56,24 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
         }
       }
     }
+    // g->calculateLayout();
+  }
+
+  if (key == GLFW_KEY_E && action == GLFW_PRESS) {
+    auto rnd_1 = g->getRandomVertex();
+    auto rnd_2 = g->getRandomVertex();
+    if (rnd_2 != rnd_1) {
+      g->addEdge(rnd_2, rnd_1, dis(gen));
+    }
+  }
+  if (key == GLFW_KEY_W && action == GLFW_PRESS) {
+    g->primMST();
+  }
+  if (key == GLFW_KEY_S && action == GLFW_PRESS) {
     g->calculateLayout();
+  }
+  if (key == GLFW_KEY_K && action == GLFW_PRESS) {
+    g->primMST();
   }
 }
 

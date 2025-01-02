@@ -618,16 +618,16 @@ public:
     std::size_t iter_pos = 0;
     std::size_t exist_pos = positions.size();
 
-    for(; iter_pos < numVerts and iter_pos <  positions.size() ; ++iter_pos) {
-        newPositions[iter_pos].x = positions[iter_pos][0];
-        newPositions[iter_pos].y = positions[iter_pos][1];
-        newPositions[iter_pos].z = positions[iter_pos][2];
+    for (; iter_pos < numVerts and iter_pos < positions.size(); ++iter_pos) {
+      newPositions[iter_pos].x = positions[iter_pos][0];
+      newPositions[iter_pos].y = positions[iter_pos][1];
+      newPositions[iter_pos].z = positions[iter_pos][2];
     }
 
-    if(iter_pos < numVerts) {
+    if (iter_pos < numVerts) {
       std::mt19937 gen(0);
       std::uniform_real_distribution<> dis(0.0, sideLength);
-      for( ; iter_pos < numVerts; ++iter_pos) {
+      for (; iter_pos < numVerts; ++iter_pos) {
         newPositions[iter_pos].x = dis(gen);
         newPositions[iter_pos].y = dis(gen);
         newPositions[iter_pos].z = dis(gen);
@@ -650,7 +650,7 @@ public:
     auto weightMap = boost::get(boost::edge_weight_t(), g);
 
     // 7) Force-directed loop
-    // change 0 to extist pos 
+    // change 0 to extist pos
     for (int iter = 0; iter < iterations; ++iter) {
       // a) We'll reduce temperature linearly each iteration
       double t = t0 * (1.0 - (double)iter / (double)iterations);
@@ -1120,5 +1120,205 @@ public:
     return static_cast<const graph_impl_details::BoostGraphStructure<
         VertexProperty, EdgeProperty> *>(structure.get())
         ->getBoostGraph();
+  }
+  void primMST() {
+    if (vertexCount() == 0)
+      return;
+
+    std::vector<vertex_descriptor> vertices = getVertices();
+    std::vector<bool> inMST(vertexCount(), false);
+    std::vector<int> key(vertexCount(), std::numeric_limits<int>::max());
+    std::vector<vertex_descriptor> parent(vertexCount());
+
+    // Use a priority queue to get the minimum key vertex
+    std::priority_queue<std::pair<int, vertex_descriptor>,
+                        std::vector<std::pair<int, vertex_descriptor>>,
+                        std::greater<std::pair<int, vertex_descriptor>>>
+        pq;
+
+    // Start with the first vertex
+    vertex_descriptor start = vertices[0];
+    pq.push({0, start});
+    key[start] = 0;
+
+    while (!pq.empty()) {
+      vertex_descriptor u = pq.top().second;
+      pq.pop();
+
+      if (inMST[u])
+        continue;
+
+      inMST[u] = true;
+
+      // Check all adjacent vertices of u
+      for (vertex_descriptor v : structure->getAdjacentVertices(u)) {
+        edge_descriptor e;
+        bool exists;
+        boost::tie(e, exists) = boost::edge(u, v, getBoostGraph());
+        if (exists) {
+          int weight = getWeightForEdge(e); // retrieve from old graph
+          if (!inMST[v] && weight < key[v]) {
+            parent[v] = u;
+            key[v] = weight;
+            pq.push({key[v], v});
+          }
+        }
+      }
+    }
+
+    // Create a new graph with only the MST edges
+    BoostGraph &oldGraph = static_cast<graph_impl_details::BoostGraphStructure<
+        VertexProperty, EdgeProperty> *>(structure.get())
+                               ->getBoostGraph();
+    BoostGraph newGraph;
+
+    std::unordered_map<vertex_descriptor, vertex_descriptor> oldToNew;
+    oldToNew.reserve(vertices.size());
+
+    for (auto oldV : vertices) {
+      vertex_descriptor newV = boost::add_vertex(oldGraph[oldV], newGraph);
+      oldToNew[oldV] = newV;
+    }
+
+    for (size_t i = 1; i < vertices.size(); ++i) {
+      vertex_descriptor v = vertices[i];
+      vertex_descriptor p = parent[v];
+
+      edge_descriptor e_old;
+      bool exists;
+      boost::tie(e_old, exists) = boost::edge(p, v, oldGraph);
+      if (exists) {
+        vertex_descriptor newP = oldToNew[p];
+        vertex_descriptor newV = oldToNew[v];
+        edge_descriptor e_new;
+        bool added;
+
+        // Get the weight of the old edge
+        int weight = getWeightForEdge(e_old);
+
+        // Add the edge to the new graph with its weight
+        boost::tie(e_new, added) =
+            boost::add_edge(newP, newV, EdgeProperty(weight), newGraph);
+
+        if (added) {
+          // Copy over any additional edge properties if needed
+          // Note: We've already set the weight, so we might not need this line
+          // unless there are other properties to copy
+          // newGraph[e_new] = oldGraph[e_old];
+        }
+      }
+    }
+
+    // (5) Replace the old graph with the new MST
+    static_cast<graph_impl_details::BoostGraphStructure<VertexProperty,
+                                                        EdgeProperty> *>(
+        structure.get())
+        ->getBoostGraph() = std::move(newGraph);
+  }
+
+  void kruskalMST() {
+    // 0) Early exit if no vertices
+    if (vertexCount() == 0) {
+      return;
+    }
+
+    auto edgesVec = getEdges(); // e.g., vector<edge_descriptor>
+
+    // 2) Sort edges by weight
+    std::sort(edgesVec.begin(), edgesVec.end(),
+              [this](const edge_descriptor &e1, const edge_descriptor &e2) {
+                return getWeightForEdge(e1) < getWeightForEdge(e2);
+              });
+
+    std::vector<vertex_descriptor> vertices = getVertices();
+    std::unordered_map<vertex_descriptor, size_t> indexMap;
+    indexMap.reserve(vertices.size());
+    for (size_t i = 0; i < vertices.size(); ++i) {
+      indexMap[vertices[i]] = i;
+    }
+
+    // parent[i] = i, rank[i] = 0
+    std::vector<size_t> parent(vertices.size());
+    std::vector<size_t> rank(vertices.size(), 0);
+    for (size_t i = 0; i < vertices.size(); i++) {
+      parent[i] = i;
+    }
+
+    // Helper lambdas for find/unite
+    std::function<size_t(size_t)> findSet = [&](size_t x) -> size_t {
+      if (parent[x] != x) {
+        parent[x] = findSet(parent[x]); // path compression
+      }
+      return parent[x];
+    };
+
+    auto unionSet = [&](size_t x, size_t y) {
+      x = findSet(x);
+      y = findSet(y);
+      if (x != y) {
+        // union by rank
+        if (rank[x] < rank[y]) {
+          parent[x] = y;
+        } else if (rank[x] > rank[y]) {
+          parent[y] = x;
+        } else {
+          parent[y] = x;
+          rank[x]++;
+        }
+      }
+    };
+
+    // 4) Create a new MST graph
+    BoostGraph &oldGraph = static_cast<graph_impl_details::BoostGraphStructure<
+        VertexProperty, EdgeProperty> *>(structure.get())
+                               ->getBoostGraph();
+    BoostGraph newGraph;
+
+    // 5) Create a map old -> new vertex descriptors
+    std::unordered_map<vertex_descriptor, vertex_descriptor> oldToNew;
+    oldToNew.reserve(vertices.size());
+
+    // Add each old vertex to the new graph
+    for (auto oldV : vertices) {
+      vertex_descriptor newV = boost::add_vertex(oldGraph[oldV], newGraph);
+      oldToNew[oldV] = newV;
+    }
+
+    // 6) Iterate over edges in sorted order; pick if they connect different
+    // sets
+    for (auto &e : edgesVec) {
+      // Retrieve endpoints in the old graph
+      auto uOld = boost::source(e, oldGraph);
+      auto vOld = boost::target(e, oldGraph);
+
+      // Find their union-find representatives
+      size_t uIdx = indexMap[uOld];
+      size_t vIdx = indexMap[vOld];
+
+      // If they’re in different sets, unify and add the edge to MST
+      if (findSet(uIdx) != findSet(vIdx)) {
+        unionSet(uIdx, vIdx);
+
+        // Get the mapped vertices in newGraph
+        vertex_descriptor newU = oldToNew[uOld];
+        vertex_descriptor newV = oldToNew[vOld];
+
+        // Retrieve the weight to attach to the new MST edge
+        int w = getWeightForEdge(e);
+
+        edge_descriptor e_new;
+        bool added;
+        boost::tie(e_new, added) =
+            boost::add_edge(newU, newV, EdgeProperty(w), newGraph);
+
+
+      }
+    }
+
+    // 7) Replace old graph with new MST
+    static_cast<graph_impl_details::BoostGraphStructure<VertexProperty,
+                                                        EdgeProperty> *>(
+        structure.get())
+        ->getBoostGraph() = std::move(newGraph);
   }
 };
